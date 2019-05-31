@@ -1,8 +1,9 @@
 package io.pivotal.pal.tracker;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,50 +14,63 @@ import java.util.List;
 public class TimeEntryController {
 
     TimeEntryRepository timeEntryRepository;
+    private final DistributionSummary timeEntrySummary;
+    private final Counter actionCounter;
 
-    public TimeEntryController(TimeEntryRepository timeEntryRepository) {
-        this.timeEntryRepository = timeEntryRepository;
+    public TimeEntryController(
+            TimeEntryRepository timeEntriesRepo,
+            MeterRegistry meterRegistry
+    ) {
+        this.timeEntryRepository = timeEntriesRepo;
 
+        timeEntrySummary = meterRegistry.summary("timeEntry.summary");
+        actionCounter = meterRegistry.counter("timeEntry.actionCounter");
     }
 
-    @PostMapping(produces = MediaType.APPLICATION_JSON_UTF8_VALUE)
-    public ResponseEntity create(@RequestBody TimeEntry timeEntryToCreate) {
-        //System.out.println();
-        //timeEntryRepository.create(timeEntryToCreate);
-        return new ResponseEntity(timeEntryRepository.create(timeEntryToCreate), HttpStatus.CREATED);
+
+    @PostMapping
+    public ResponseEntity<TimeEntry> create(@RequestBody TimeEntry timeEntry) throws Exception {
+        TimeEntry createdTimeEntry = timeEntryRepository.create(timeEntry);
+        actionCounter.increment();
+        timeEntrySummary.record(timeEntryRepository.list().size());
+
+        return new ResponseEntity<>(createdTimeEntry, HttpStatus.CREATED);
     }
 
-    @DeleteMapping(value = "/{id}")
-    public ResponseEntity<TimeEntry> delete(@PathVariable("id") long timeEntryId) {
-        timeEntryRepository.delete(timeEntryId);
-        return new ResponseEntity<TimeEntry>(HttpStatus.NO_CONTENT);
+    @DeleteMapping("{id}")
+    public ResponseEntity<TimeEntry> delete(@PathVariable Long id) throws Exception {
+        timeEntryRepository.delete(id);
+        actionCounter.increment();
+        timeEntrySummary.record(timeEntryRepository.list().size());
+
+        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
     }
 
-    @PutMapping(value="/{id}")
-    public ResponseEntity update(@PathVariable("id") long timeEntryId, @RequestBody TimeEntry expected) {
-        TimeEntry obj =timeEntryRepository.update(timeEntryId,expected);
-        if( null != obj){
-            return new ResponseEntity(obj,HttpStatus.OK);
+    @PutMapping("{id}")
+    public ResponseEntity<TimeEntry> update(@PathVariable Long id, @RequestBody TimeEntry timeEntry) {
+        TimeEntry updatedTimeEntry = timeEntryRepository.update(id, timeEntry);
+        if (updatedTimeEntry != null) {
+            actionCounter.increment();
+            return new ResponseEntity<>(updatedTimeEntry, HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-        else {
-         return new ResponseEntity(HttpStatus.NOT_FOUND) ;
-    }
     }
 
-    @GetMapping(produces = MediaType.APPLICATION_JSON_UTF8_VALUE, value="/{id}")
-    public ResponseEntity<TimeEntry> read(@PathVariable("id") long nonExistentTimeEntryId) {
-
-        TimeEntry obj = timeEntryRepository.find(nonExistentTimeEntryId);
-        if(obj != null){
-            return new ResponseEntity<TimeEntry>(obj, HttpStatus.OK);
+    @GetMapping("{id}")
+    public ResponseEntity<TimeEntry> read(@PathVariable Long id) {
+        TimeEntry timeEntry = timeEntryRepository.find(id);
+        if (timeEntry != null) {
+            actionCounter.increment();
+            return new ResponseEntity<>(timeEntry, HttpStatus.OK);
+        } else {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-        else
-            return new ResponseEntity<TimeEntry>(HttpStatus.NOT_FOUND);
     }
 
-    @GetMapping()
+    @GetMapping
     public ResponseEntity<List<TimeEntry>> list() throws Exception {
-        return new ResponseEntity<List<TimeEntry>>(timeEntryRepository.list(),HttpStatus.OK);
-
+        actionCounter.increment();
+        return new ResponseEntity<>(timeEntryRepository.list(), HttpStatus.OK);
     }
 }
